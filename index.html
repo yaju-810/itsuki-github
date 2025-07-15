@@ -1,0 +1,518 @@
+
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        
+
+
+  
+  人狼ゲーム（クラスルーム版・修正版V2）
+  
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    #login-panel, #game-panel, #gm-panel { margin: 10px 0; }
+    #game-log, #gm-log { border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: scroll; }
+    #game-state, #gm-state { margin: 10px 0; }
+    #action-panel, #discussion-panel { margin: 10px 0; }
+    button { padding: 10px 20px; margin: 5px; }
+    select, input[type="text"] { padding: 5px; margin: 5px; }
+    .player-icon.alive { color: green; }
+    .player-icon.dead { color: red; }
+    .hidden { display: none; }
+  
+
+
+  人狼ゲーム（クラスルーム版）
+  
+    プレイヤーIDまたはゲームマスターを選択:
+    
+      選択してください
+      ゲームマスター
+      プレイヤー1
+      プレイヤー2
+      プレイヤー3
+      プレイヤー4
+      プレイヤー5
+      プレイヤー6
+    
+    ログイン
+  
+  
+    ゲーム開始
+    
+    
+    
+    
+  
+  
+    ゲームマスター画面
+    ゲーム開始
+    
+    
+    次のフェーズに進む
+    
+  
+
+  
+    const roles = {
+      villager: { name: "村人", team: "village" },
+      werewolf: { name: "人狼", team: "werewolf" },
+      seer: { name: "占い師", team: "village" },
+      knight: { name: "騎士", team: "village" },
+      spy: { name: "スパイ", team: "werewolf" }
+    };
+
+    let players = [];
+    let gameLog = {};
+    let discussionLog = [];
+    let night = 0;
+    let currentPhase = "";
+    let currentPlayerIndex = 0;
+    let actions = {};
+    let votes = {};
+    let currentPlayerId = null;
+    let actionCompleted = {};
+    let voteCompleted = {};
+    let gameStarted = false;
+
+    function startGame() {
+      if (!currentPlayerId) {
+        alert("先にログインしてください！");
+        return;
+      }
+      const roleList = [roles.villager, roles.villager, roles.werewolf, roles.seer, roles.knight, roles.spy];
+      roleList.sort(() => Math.random() - 0.5);
+      players = [
+        { id: 1, role: roleList[0], alive: true },
+        { id: 2, role: roleList[1], alive: true },
+        { id: 3, role: roleList[2], alive: true },
+        { id: 4, role: roleList[3], alive: true },
+        { id: 5, role: roleList[4], alive: true },
+        { id: 6, role: roleList[5], alive: true }
+      ];
+      gameLog = Object.fromEntries(players.map(p => [p.id, []]));
+      gameLog["gm"] = [];
+      discussionLog = [];
+      night = 0;
+      currentPhase = "";
+      currentPlayerIndex = 0;
+      actions = {};
+      votes = {};
+      actionCompleted = {};
+      voteCompleted = {};
+      gameStarted = true;
+      if (currentPlayerId !== "gm") {
+        const player = players.find(p => p.id === parseInt(currentPlayerId));
+        if (player) {
+          logMessage(currentPlayerId, `ゲーム開始！あなたの役職: ${player.role.name}`);
+        }
+      } else {
+        logMessage("gm", `ゲーム開始！プレイヤー: ${players.map(p => `P${p.id}(${p.role.name})`).join(", ")}`);
+      }
+      updateGameState();
+      updateGmState();
+      nextTurn();
+    }
+
+    function login() {
+      currentPlayerId = document.getElementById("player-id").value;
+      if (!currentPlayerId || (currentPlayerId !== "gm" && !["1", "2", "3", "4", "5", "6"].includes(currentPlayerId))) {
+        alert("有効なプレイヤーIDまたはゲームマスターを選択してください！");
+        return;
+      }
+      document.getElementById("login-panel").classList.add("hidden");
+      if (currentPlayerId === "gm") {
+        document.getElementById("gm-panel").classList.remove("hidden");
+      } else {
+        document.getElementById("game-panel").classList.remove("hidden");
+      }
+      updateGameState();
+      updateGmState();
+    }
+
+    function logMessage(playerId, message) {
+      if (!gameLog[playerId]) gameLog[playerId] = [];
+      gameLog[playerId].push(message);
+      if (playerId === currentPlayerId) {
+        document.getElementById("game-log").innerHTML += `<p>${message}</p>`;
+        document.getElementById("game-log").scrollTop = document.getElementById("game-log").scrollHeight;
+      } else if (playerId === "gm" && currentPlayerId === "gm") {
+        document.getElementById("gm-log").innerHTML += `<p>${message}</p>`;
+        document.getElementById("gm-log").scrollTop = document.getElementById("gm-log").scrollHeight;
+      }
+    }
+
+    function logDiscussion(playerId, message) {
+      discussionLog.push(`P${playerId}: ${message}`);
+      players.forEach(p => {
+        if (p.id === parseInt(currentPlayerId) || currentPlayerId === "gm") {
+          logMessage(p.id, `P${playerId}: ${message}`);
+        }
+      });
+      updateGmState();
+    }
+
+    function getAlivePlayers() {
+      return players.filter(p => p.alive);
+    }
+
+    function updateGameState() {
+      if (!currentPlayerId || currentPlayerId === "gm" || !gameStarted) return;
+      const alivePlayers = getAlivePlayers();
+      const currentPlayer = players.find(p => p.id === parseInt(currentPlayerId));
+      if (!currentPlayer) {
+        logMessage(currentPlayerId, "エラー: プレイヤーが見つかりません。ゲームを再開始してください。");
+        return;
+      }
+      document.getElementById("game-state").innerHTML = `
+        <p>あなたの役職: ${currentPlayer.role.name}</p>
+        <p>現在のターン: ${night + 1} | フェーズ: ${currentPhase === "night" ? "夜" : currentPhase === "discussion" ? "議論" : "投票"}</p>
+        <p>生存者: ${alivePlayers.map(p => `<span class="player-icon ${p.alive ? 'alive' : 'dead'}">P${p.id}</span>`).join(", ")}</p>
+      `;
+      if (currentPhase === "discussion" && gameStarted) {
+        document.getElementById("discussion-panel").innerHTML = `
+          <p>議論: メッセージを入力してください</p>
+          <input type="text" id="discussion-input" maxlength="100">
+          <button onclick="submitDiscussion()">送信</button>
+          <div>最新の議論: ${discussionLog.slice(-3).join("<br>")}</div>
+        `;
+      } else {
+        document.getElementById("discussion-panel").innerHTML = "";
+      }
+    }
+
+    function updateGmState() {
+      if (currentPlayerId !== "gm") return;
+      const alivePlayers = getAlivePlayers();
+      document.getElementById("gm-state").innerHTML = `
+        <p>現在のターン: ${night + 1} | フェーズ: ${currentPhase === "night" ? "夜" : currentPhase === "discussion" ? "議論" : "投票"}</p>
+        <p>プレイヤー: ${players.map(p => `<span class="player-icon ${p.alive ? 'alive' : 'dead'}">P${p.id}(${p.role.name})</span>`).join(", ")}</p>
+      `;
+      const actionStatus = currentPhase === "night" ? Object.keys(actionCompleted).length : currentPhase === "discussion" ? 0 : Object.keys(voteCompleted).length;
+      const requiredActions = currentPhase === "night" ? alivePlayers.filter(p => p.role !== roles.villager).length : currentPhase === "discussion" ? 0 : alivePlayers.length;
+      document.getElementById("gm-actions").innerHTML = `
+        <p>行動完了: ${actionStatus}/${requiredActions}</p>
+        <p>最新の議論: ${discussionLog.slice(-3).join("<br>")}</p>
+      `;
+      document.getElementById("next-phase-button").classList.toggle("hidden", actionStatus < requiredActions && currentPhase !== "discussion");
+    }
+
+    function checkWinCondition() {
+      const alivePlayers = getAlivePlayers();
+      const villageTeam = alivePlayers.filter(p => p.role.team === "village").length;
+      const werewolfTeam = alivePlayers.filter(p => p.role.team === "werewolf").length;
+
+      if (werewolfTeam === 0) {
+        players.forEach(p => {
+          if (p.id === parseInt(currentPlayerId) || currentPlayerId === "gm") {
+            logMessage(p.id, "村人チームの勝利！人狼とスパイが全滅しました。");
+          }
+        });
+        document.getElementById("action-panel").innerHTML = "";
+        document.getElementById("discussion-panel").innerHTML = "";
+        document.getElementById("next-phase-button").classList.add("hidden");
+        gameStarted = false;
+        return true;
+      }
+      if (villageTeam <= werewolfTeam) {
+        players.forEach(p => {
+          if (p.id === parseInt(currentPlayerId) || currentPlayerId === "gm") {
+            logMessage(p.id, "人狼チームの勝利！村人側が人狼側と同数以下になりました。");
+          }
+        });
+        document.getElementById("action-panel").innerHTML = "";
+        document.getElementById("discussion-panel").innerHTML = "";
+        document.getElementById("next-phase-button").classList.add("hidden");
+        gameStarted = false;
+        return true;
+      }
+      return false;
+    }
+
+    function showActionPanel(player, actionType, callback) {
+      const alivePlayers = getAlivePlayers();
+      const options = alivePlayers
+        .filter(p => actionType !== "werewolf" || p.id !== player.id)
+        .map(p => `<option value="${p.id}">P${p.id}</option>`).join("");
+      document.getElementById("action-panel").innerHTML = `
+        <p>あなたの行動: ${actionType === "werewolf" ? "襲撃対象" : actionType === "seer" ? "占い対象" : actionType === "knight" ? "守る対象" : actionType === "spy" ? "妨害対象" : "投票対象"}を選択</p>
+        <select id="action-target">
+          ${options}
+        </select>
+        <button onclick="submitAction(${player.id}, '${actionType}')">決定</button>
+      `;
+      window.submitAction = (playerId, type) => {
+        const targetId = parseInt(document.getElementById("action-target").value);
+        callback(playerId, targetId);
+      };
+    }
+
+    function submitDiscussion() {
+      const message = document.getElementById("discussion-input").value;
+      if (message && gameStarted) {
+        logDiscussion(currentPlayerId, message);
+        document.getElementById("discussion-input").value = "";
+      }
+    }
+
+    function nightPhase() {
+      night++;
+      currentPhase = "night";
+      currentPlayerIndex = 0;
+      actions = {};
+      actionCompleted = {};
+      if (currentPlayerId !== "gm") {
+        logMessage(currentPlayerId, `=== 夜${night} ===`);
+        const currentPlayer = players.find(p => p.id === parseInt(currentPlayerId));
+        if (currentPlayer && currentPlayer.role === roles.villager) {
+          logMessage(currentPlayerId, "あなたは村人です。夜は行動がありません。");
+          document.getElementById("action-panel").innerHTML = "<p>ゲームマスターがフェーズを進めるのを待っています...</p>";
+        }
+      } else {
+        logMessage("gm", `=== 夜${night} ===`);
+      }
+      processNightAction();
+    }
+
+    function processNightAction() {
+      const alivePlayers = getAlivePlayers();
+      const actionOrder = [
+        { role: roles.werewolf, type: "werewolf" },
+        { role: roles.seer, type: "seer" },
+        { role: roles.knight, type: "knight" },
+        { role: roles.spy, type: "spy" }
+      ];
+
+      while (currentPlayerIndex < actionOrder.length) {
+        const { role, type } = actionOrder[currentPlayerIndex];
+        const player = alivePlayers.find(p => p.role === role);
+        if (player && player.id === parseInt(currentPlayerId)) {
+          showActionPanel(player, type, (playerId, targetId) => {
+            actions[type] = { playerId, targetId };
+            actionCompleted[playerId] = true;
+            logMessage(playerId, `あなたがP${targetId}を選択しました。`);
+            logMessage("gm", `P${playerId}(${player.role.name})がP${targetId}を選択しました。`);
+            document.getElementById("action-panel").innerHTML = "<p>ゲームマスターがフェーズを進めるのを待っています...</p>";
+            currentPlayerIndex++;
+            updateGmState();
+            processNightAction();
+          });
+          return;
+        } else if (player) {
+          // 他のプレイヤーの行動をシミュレート
+          const validTargets = alivePlayers.filter(p => type !== "werewolf" || p.id !== player.id);
+          if (validTargets.length > 0) {
+            actions[type] = { playerId: player.id, targetId: validTargets[Math.floor(Math.random() * validTargets.length)].id };
+            actionCompleted[player.id] = true;
+            logMessage("gm", `P${player.id}(${player.role.name})がP${actions[type].targetId}を選択しました。`);
+          }
+          currentPlayerIndex++;
+        } else {
+          currentPlayerIndex++;
+        }
+      }
+
+      // 夜の処理
+      const alivePlayersMap = Object.fromEntries(players.map(p => [p.id, p]));
+      const spyTarget = actions.spy ? alivePlayersMap[actions.spy.targetId] : null;
+      const werewolf = alivePlayers.find(p => p.role === roles.werewolf);
+      const attackTarget = actions.werewolf && (!spyTarget || spyTarget.id !== werewolf?.id) ? alivePlayersMap[actions.werewolf.targetId] : null;
+      const protectedPlayer = actions.knight && (!spyTarget || spyTarget.id !== actions.knight?.playerId) ? alivePlayersMap[actions.knight.targetId] : null;
+      const seerTarget = actions.seer && (!spyTarget || spyTarget.id !== actions.seer?.playerId) ? alivePlayersMap[actions.seer.targetId] : null;
+
+      if (werewolf && werewolf.id === parseInt(currentPlayerId)) {
+        if (attackTarget) {
+          logMessage(currentPlayerId, `あなたがP${attackTarget.id}を襲撃しました。`);
+          if (protectedPlayer && protectedPlayer.id === attackTarget.id) {
+            logMessage(currentPlayerId, `P${attackTarget.id}は騎士に守られ、襲撃に失敗しました。`);
+          } else {
+            logMessage(currentPlayerId, `P${attackTarget.id}を襲撃しました。`);
+          }
+        } else if (spyTarget && spyTarget.id === werewolf.id) {
+          logMessage(currentPlayerId, "あなたはスパイに妨害され、襲撃できませんでした。");
+        }
+      }
+
+      if (seerTarget && actions.seer?.playerId === parseInt(currentPlayerId)) {
+        logMessage(currentPlayerId, `あなたがP${seerTarget.id}を占い、${seerTarget.role.name}と判明しました。`);
+      }
+
+      if (actions.knight && actions.knight.playerId === parseInt(currentPlayerId)) {
+        logMessage(currentPlayerId, `あなたがP${actions.knight.targetId}を守りました。`);
+        if (attackTarget && protectedPlayer && protectedPlayer.id === attackTarget.id) {
+          logMessage(currentPlayerId, `P${attackTarget.id}への襲撃を防ぎました！`);
+        }
+      }
+
+      if (spyTarget && actions.spy?.playerId === parseInt(currentPlayerId)) {
+        logMessage(currentPlayerId, `あなたがP${spyTarget.id}を妨害しました。`);
+      }
+
+      if (currentPlayerId === "gm") {
+        if (attackTarget) {
+          logMessage("gm", `人狼がP${attackTarget.id}(${attackTarget.role.name})を襲撃しました。`);
+          if (protectedPlayer && protectedPlayer.id === attackTarget.id) {
+            logMessage("gm", `P${attackTarget.id}は騎士に守られ、生存しました。`);
+          } else {
+            logMessage("gm", `P${attackTarget.id}(${attackTarget.role.name})が死亡しました。`);
+          }
+        } else if (werewolf && spyTarget && spyTarget.id === werewolf.id) {
+          logMessage("gm", "人狼がスパイに妨害され、襲撃できませんでした。");
+        }
+        if (seerTarget) {
+          logMessage("gm", `占い師がP${seerTarget.id}を占い、${seerTarget.role.name}と判明しました。`);
+        }
+        if (actions.knight && (!spyTarget || spyTarget.id !== actions.knight?.playerId)) {
+          logMessage("gm", `騎士がP${actions.knight.targetId}を守りました。`);
+        }
+        if (spyTarget) {
+          logMessage("gm", `スパイがP${spyTarget.id}(${spyTarget.role.name})を妨害しました。`);
+        }
+      }
+
+      if (attackTarget && (!protectedPlayer || protectedPlayer.id !== attackTarget.id)) {
+        attackTarget.alive = false;
+        players.forEach(p => {
+          if (p.id === parseInt(currentPlayerId) || currentPlayerId === "gm") {
+            logMessage(p.id, `P${attackTarget.id}が死亡しました。`);
+          }
+        });
+      }
+
+      document.getElementById("action-panel").innerHTML = "<p>ゲームマスターがフェーズを進めるのを待っています...</p>";
+      updateGameState();
+      updateGmState();
+    }
+
+    function discussionPhase() {
+      currentPhase = "discussion";
+      if (currentPlayerId !== "gm") {
+        logMessage(currentPlayerId, `=== 議論フェーズ${night} ===`);
+      } else {
+        logMessage("gm", `=== 議論フェーズ${night} ===`);
+      }
+      updateGameState();
+      updateGmState();
+    }
+
+    function dayPhase() {
+      currentPhase = "day";
+      currentPlayerIndex = 0;
+      votes = {};
+      voteCompleted = {};
+      if (currentPlayerId !== "gm") {
+        logMessage(currentPlayerId, `=== 投票フェーズ${night} ===`);
+      } else {
+        logMessage("gm", `=== 投票フェーズ${night} ===`);
+      }
+      processDayVote();
+    }
+
+    function processDayVote() {
+      const alivePlayers = getAlivePlayers();
+      if (currentPlayerIndex < alivePlayers.length) {
+        const player = alivePlayers[currentPlayerIndex];
+        if (player.id === parseInt(currentPlayerId)) {
+          showActionPanel(player, "vote", (playerId, targetId) => {
+            votes[playerId] = targetId;
+            voteCompleted[playerId] = true;
+            logMessage(playerId, `あなたがP${targetId}に投票しました。`);
+            logMessage("gm", `P${playerId}がP${targetId}に投票しました。`);
+            document.getElementById("action-panel").innerHTML = "<p>ゲームマスターがフェーズを進めるのを待っています...</p>";
+            currentPlayerIndex++;
+            updateGmState();
+            processDayVote();
+          });
+        } else {
+          // 他のプレイヤーの投票をシミュレート
+          const validTargets = alivePlayers;
+          if (validTargets.length > 0) {
+            votes[player.id] = validTargets[Math.floor(Math.random() * validTargets.length)].id;
+            voteCompleted[player.id] = true;
+            logMessage("gm", `P${player.id}がP${votes[player.id]}に投票しました。`);
+          }
+          currentPlayerIndex++;
+          processDayVote();
+        }
+      } else {
+        const voteCounts = {};
+        for (const voterId in votes) {
+          const targetId = votes[voterId];
+          voteCounts[targetId] = (voteCounts[targetId] || 0) + 1;
+        }
+        let maxVotes = 0;
+        let exileTarget = null;
+        for (const targetId in voteCounts) {
+          if (voteCounts[targetId] > maxVotes) {
+            maxVotes = voteCounts[targetId];
+            exileTarget = players.find(p => p.id == targetId);
+          }
+        }
+        if (exileTarget) {
+          exileTarget.alive = false;
+          players.forEach(p => {
+            if (p.id === parseInt(currentPlayerId) || currentPlayerId === "gm") {
+              logMessage(p.id, `P${exileTarget.id}が追放されました。`);
+            }
+          });
+        }
+        document.getElementById("action-panel").innerHTML = "";
+        updateGameState();
+        updateGmState();
+        if (!checkWinCondition()) {
+          nextTurn();
+        }
+      }
+    }
+
+    function nextPhase() {
+      if (currentPhase === "night") {
+        discussionPhase();
+      } else if (currentPhase === "discussion") {
+        dayPhase();
+      } else {
+        nextTurn();
+      }
+    }
+
+    function nextTurn() {
+      if (!checkWinCondition()) {
+        nightPhase();
+      }
+    }
+  
+(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'95f51b7e3c88611d',t:'MTc1MjUzODk2Ny4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();
